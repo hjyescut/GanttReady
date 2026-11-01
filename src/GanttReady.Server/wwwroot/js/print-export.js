@@ -69,6 +69,25 @@
     });
     return hide;
   }
+  // 隐藏列后收缩左表容器宽度：18 列的容器宽度不会自动缩，条形区被顶到右边留出大空档
+  function shrinkLeftTable(doc) {
+    var header = doc.querySelector('.gantt-left-header');
+    var left = doc.querySelector('.gantt-left');
+    if (!header || !left) return;
+    var sum = 0;
+    Array.prototype.forEach.call(header.children, function (cell) {
+      if (cell.classList.contains('print-export-hide')) return;
+      sum += cell.offsetWidth || 0;
+    });
+    if (sum < 50) return;
+    var w = Math.ceil(sum) + 2;
+    left.style.width = w + 'px';
+    left.style.flex = 'none';
+    var lb = doc.querySelector('.gantt-left-body');
+    var lh = doc.querySelector('.gantt-left-header');
+    if (lb) lb.style.width = w + 'px';
+    if (lh) lh.style.width = w + 'px';
+  }
   function applyColumnHiding(doc, hideIdx) {
     if (!hideIdx || !hideIdx.length) return;
     var rows = doc.querySelectorAll('.gantt-left-header, .gantt-left-row');
@@ -263,7 +282,7 @@
         var root = doc.querySelector('.gantt-container');
         if (root && opts.palette === 'delivery') root.classList.add('print-palette-delivery');
         if (root && opts.palette === 'mono') root.classList.add('print-palette-mono');
-        if (opts.columns === 'delivery5') applyColumnHiding(doc, computeHideIndexes(doc));
+        if (opts.columns === 'delivery5') { applyColumnHiding(doc, computeHideIndexes(doc)); shrinkLeftTable(doc); }
         if (opts.includeTitle) addTitle(doc, opts.paletteName || '');
       }
     }).then(function (canvas) {
