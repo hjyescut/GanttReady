@@ -250,8 +250,18 @@
             ensurePaletteStyle(doc);
             neutralizeHatch(doc);
             hideZeroBars(doc);
+            if (opts.onclone) opts.onclone(doc);   // 列组隐藏+左表收缩必须先于展开，否则容器按 18 列宽展开
             expandForCapture(doc);
-            if (opts.onclone) opts.onclone(doc);
+            try {   // 尺寸探针：定位上下留白来源
+              var root = doc.querySelector('.gantt-container');
+              var toDim = function (el) { return el ? Math.round(el.getBoundingClientRect().width) + 'x' + Math.round(el.getBoundingClientRect().height) : '-'; };
+              window.__peDims = {
+                container: toDim(root), main: toDim(doc.querySelector('.gantt-main')),
+                left: toDim(doc.querySelector('.gantt-left')), right: toDim(doc.querySelector('.gantt-right')),
+                leftBody: toDim(doc.querySelector('.gantt-left-body')), bars: toDim(doc.querySelector('.gantt-bars')),
+                chart: toDim(doc.querySelector('.gantt-chart'))
+              };
+            } catch (e) { }
           }
         }).then(function (canvas) {
           finish();
