@@ -17,11 +17,13 @@ public class BridgeController : ControllerBase
 {
     private readonly IProjectService _projects;
     private readonly ILogger<BridgeController> _logger;
+    private readonly IWebHostEnvironment _env;
 
-    public BridgeController(IProjectService projects, ILogger<BridgeController> logger)
+    public BridgeController(IProjectService projects, ILogger<BridgeController> logger, IWebHostEnvironment env)
     {
         _projects = projects;
         _logger = logger;
+        _env = env;
     }
 
     // ---------- DTO ----------
@@ -248,6 +250,35 @@ public class BridgeController : ControllerBase
                 lag = r.Lag
             })
         });
+    }
+
+    // ---------- P6 双代号时标视图（AoA HTML 存取，fork 补丁 #2.3） ----------
+    // 外部转换器（ganttready_bridge.py --aoa）把当前项目的 PDM 图转成时标双代号自包含 HTML 后 POST 到这里，
+    // 落盘 wwwroot/aoa/aoa-{projectId}.html，浏览器直接打开即看。视图为校核用途，非交付件。
+
+    [HttpPost("aoa/{projectId}")]
+    public async Task<IActionResult> SaveAoaHtml(int projectId)
+    {
+        using var reader = new StreamReader(Request.Body);
+        var html = await reader.ReadToEndAsync();
+        if (string.IsNullOrWhiteSpace(html) || html.Length < 200)
+            return BadRequest(new { error = "AoA HTML 内容为空或过短" });
+        var dir = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "aoa");
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, $"aoa-{projectId}.html");
+        await System.IO.File.WriteAllTextAsync(file, html);
+        return Ok(new { url = $"/aoa/aoa-{projectId}.html", bytes = new FileInfo(file).Length });
+    }
+
+    [HttpGet("aoa/{projectId}")]
+    public IActionResult GetAoaInfo(int projectId)
+    {
+        var dir = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "aoa");
+        var file = Path.Combine(dir, $"aoa-{projectId}.html");
+        if (!System.IO.File.Exists(file))
+            return NotFound(new { error = $"项目 {projectId} 尚无 AoA 视图（先运行 ganttready_bridge.py --aoa {projectId}）" });
+        return Ok(new { url = $"/aoa/aoa-{projectId}.html", bytes = new FileInfo(file).Length,
+                         updated = System.IO.File.GetLastWriteTime(file).ToString("yyyy-MM-dd HH:mm") });
     }
 
     // ---------- DELETE /api/bridge/project/{projectId}（测试清理用） ----------
