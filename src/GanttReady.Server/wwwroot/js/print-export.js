@@ -21,6 +21,8 @@
     '.print-palette-mono .gantt-bar.bar-milestone-flag{background:#404040!important}',
     '.print-palette-mono .task-status-badge{background:#fff!important;color:#000!important;border:1px solid #666!important}',
     '.print-palette-mono .gantt-left-row.zebra{background:#fff!important}',
+    '.print-palette-delivery .gantt-left-row.selected,.print-palette-mono .gantt-left-row.selected{background:#fff!important}',
+    '.print-palette-delivery .gantt-left-row.selected .col-code,.print-palette-mono .gantt-left-row.selected .col-code{color:#000!important}',
     '.print-export-hide{display:none!important}'
   ].join('\n');
 
@@ -97,6 +99,34 @@
     if (container) container.insertBefore(div, container.firstChild);
   }
 
+  // ---- 出图缩放（fork 补丁 #2.1）：dayWidth = 40 × zoom%，内容宽随缩放线性变化 ----
+  function setZoom(z) {
+    var slider = document.querySelector('.zoom-slider');
+    if (!slider) return;
+    slider.value = String(z);
+    ['input', 'change'].forEach(function (ev) {
+      slider.dispatchEvent(new Event(ev, { bubbles: true }));
+    });
+  }
+  function waitForRender(prevW, cb, tries) {
+    var right = document.querySelector('.gantt-right');
+    var w = right ? right.scrollWidth : 0;
+    if (tries <= 0 || (prevW >= 0 && Math.abs(w - prevW) < 2)) { setTimeout(cb, 120); return; }
+    setTimeout(function () { waitForRender(w, cb, tries - 1); }, 150);
+  }
+  function autoFitZoom() {
+    var slider = document.querySelector('.zoom-slider');
+    var right = document.querySelector('.gantt-right');
+    var left = document.querySelector('.gantt-left');
+    if (!slider || !right) return null;
+    var barsW = Math.max(right.scrollWidth, 1);
+    var leftW = left ? left.clientWidth : 700;
+    var targetBars = Math.max(900, 3600 - leftW);   // 目标总宽 ≈3600px（A3@scale3 视觉最佳区间）
+    var cur = parseFloat(slider.value) || 100;
+    var z = Math.round(Math.min(100, Math.max(5, cur * targetBars / barsW)) / 5) * 5;
+    return z < cur ? z : null;                      // 只缩不放
+  }
+
   function exportPdf(opts) {
     var container = document.querySelector('.gantt-container');
     if (!container) { alert('未找到甘特图容器'); return; }
@@ -115,7 +145,25 @@
     // 允许 scale<1：超宽项目把画布压到 ~8000px（420mm 上≈484dpi，仍远超打印需求）
     var scale = Math.min(3, Math.max(0.25, 8000 / contentW));
 
-    html2canvas(container, {
+    // 自动出图缩放：宽项目先降 zoom（改 dayWidth）再捕获，截完还原屏幕缩放
+    var restoreZoomTo = null;
+    if (opts.exportZoom === 'auto') {
+      var z = autoFitZoom();
+      if (z !== null) {
+        var slider0 = document.querySelector('.zoom-slider');
+        restoreZoomTo = slider0 ? slider0.value : null;
+        setZoom(z);
+      }
+    }
+    var finishRestore = function () {
+      if (restoreZoomTo !== null) {
+        var z = restoreZoomTo;
+        restoreZoomTo = null;
+        setZoom(z);
+      }
+    };
+
+    var doCapture = function () { html2canvas(container, {
       useCORS: true,
       scale: scale,                   // 高清 PNG 无损；宽项目自适应降档
       backgroundColor: '#fff',
@@ -128,6 +176,7 @@
         if (opts.includeTitle) addTitle(doc, opts.paletteName || '');
       }
     }).then(function (canvas) {
+      finishRestore();
       try {
         var jsPdfCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
         if (!jsPdfCtor) { alert('jsPDF 未加载'); return; }
@@ -143,9 +192,13 @@
         alert('PDF 生成失败：' + e.message);
       }
     }).catch(function (e) {
+      finishRestore();
       console.error('html2canvas error:', e);
       alert('渲染失败：' + e.message);
     });
+    };
+    if (restoreZoomTo !== null) { waitForRender(-1, function () { doCapture(); }, 12); }
+    else { doCapture(); }
   }
 
   // ---- 对话框 ----
@@ -172,8 +225,11 @@
       '<label style="margin-right:8px;"><input type="radio" name="pe-palette" value="screen" checked> 屏幕原色</label>' +
       '<label style="margin-right:8px;"><input type="radio" name="pe-palette" value="delivery"> 交付配色</label>' +
       '<label><input type="radio" name="pe-palette" value="mono"> 暗标灰阶</label></div>' +
+      '<div style="margin-bottom:8px;"><b>出图缩放：</b>' +
+      '<label style="margin-right:12px;"><input type="radio" name="pe-ezoom" value="auto" checked> 自动适配（推荐）</label>' +
+      '<label><input type="radio" name="pe-ezoom" value="current"> 当前屏幕缩放</label></div>' +
       '<div style="margin-bottom:8px;"><label><input type="checkbox" id="pe-title" checked> 含项目名标题</label></div>' +
-      '<div style="color:#888;font-size:12px;margin-bottom:10px;">提示：关系线/今日线/资源直方图/网格线由工具栏开关控制；导出为高清无损 PNG 入 PDF；未显示的交付列不会被补出。超宽项目（跨年日刻度）建议先把缩放调小（如 25%）再出图，否则 A3 整幅 Fit 后文字会过小。</div>' +
+      '<div style="color:#888;font-size:12px;margin-bottom:10px;">提示：关系线/今日线/资源直方图/网格线由工具栏开关控制；导出为高清无损 PNG 入 PDF；未显示的交付列不会被补出。自动缩放会在出图瞬间按内容宽调整 dayWidth 并在完成后还原屏幕缩放。</div>' +
       '<div style="text-align:right;">' +
       '<button id="pe-cancel" style="padding:5px 14px;margin-right:8px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;">取消</button>' +
       '<button id="pe-ok" style="padding:5px 16px;border:0;border-radius:4px;background:#2b6cb0;color:#fff;cursor:pointer;">生成 PDF</button></div>';
@@ -188,9 +244,10 @@
       var columns = box.querySelector('input[name="pe-columns"]:checked').value;
       var palette = box.querySelector('input[name="pe-palette"]:checked').value;
       var includeTitle = box.querySelector('#pe-title').checked;
+      var exportZoom = box.querySelector('input[name="pe-ezoom"]:checked').value;
       var paletteName = palette === 'delivery' ? '交付配色' : palette === 'mono' ? '暗标灰阶' : '原色';
       overlay.remove();
-      exportPdf({ paper: paper, columns: columns, palette: palette, includeTitle: includeTitle, paletteName: paletteName });
+      exportPdf({ paper: paper, columns: columns, palette: palette, includeTitle: includeTitle, paletteName: paletteName, exportZoom: exportZoom });
     });
   }
 
