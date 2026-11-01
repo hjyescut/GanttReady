@@ -23,6 +23,9 @@
     '.print-palette-mono .gantt-left-row.zebra{background:#fff!important}',
     '.print-palette-delivery .gantt-left-row.selected,.print-palette-mono .gantt-left-row.selected{background:#fff!important}',
     '.print-palette-delivery .gantt-left-row.selected .col-code,.print-palette-mono .gantt-left-row.selected .col-code{color:#000!important}',
+    '.print-palette-delivery .gantt-left-row.parent,.print-palette-mono .gantt-left-row.parent{box-shadow:none!important;background:#fff!important;font-weight:700!important}',
+    '.print-palette-delivery .gantt-bar-frame.parent-task,.print-palette-mono .gantt-bar-frame.parent-task{box-shadow:none!important}',
+    '.print-palette-delivery .gantt-bar-frame,.print-palette-mono .gantt-bar-frame{box-shadow:none!important}',
     '.print-export-hide{display:none!important}'
   ].join('\n');
 
@@ -163,11 +166,27 @@
       }
     };
 
+    console.debug('[print-export] start', JSON.stringify({ opts: opts, contentW: contentW, scale: scale,
+      hideCount: opts.columns === 'delivery5' ? computeHideIndexes(document).length : 0,
+      palInHead: !!document.getElementById('print-palette-css') }));
     var doCapture = function () { html2canvas(container, {
       useCORS: true,
       scale: scale,                   // 高清 PNG 无损；宽项目自适应降档
       backgroundColor: '#fff',
       onclone: function (doc) {
+        try {
+          var pal = doc.getElementById('print-palette-css');
+          var probeBar = doc.querySelector('.gantt-bar-frame.parent-task .bar-plan');
+          window.__peOnclone = {
+            styleTags: doc.querySelectorAll('style').length,
+            paletteInClone: !!pal,
+            paletteLen: pal ? pal.textContent.length : 0,
+            stylesheetLinks: doc.querySelectorAll('link[rel=stylesheet]').length,
+            headChildren: doc.head ? doc.head.children.length : -1,
+            headTail: doc.head ? [...doc.head.children].slice(-4).map(function (e) { return e.tagName + (e.id ? '#' + e.id : ''); }) : null,
+            parentBarPal: (function () { if (!probeBar) return 'no-bar'; for (var i = 0; i < doc.styleSheets.length; i++) { try { var rules = doc.styleSheets[i].cssRules; for (var j = 0; j < rules.length; j++) { if (rules[j].selectorText && rules[j].selectorText.indexOf('.print-palette-delivery .parent-task') !== -1) return 'found@sheet' + i; } } catch (e) { return 'sheetErr@' + i; } } return 'NOT-FOUND'; })()
+          };
+        } catch (e) { window.__peOnclone = { err: e.message }; }
         var root = doc.querySelector('.gantt-container');
         if (root && opts.palette === 'delivery') root.classList.add('print-palette-delivery');
         if (root && opts.palette === 'mono') root.classList.add('print-palette-mono');
@@ -250,6 +269,97 @@
       exportPdf({ paper: paper, columns: columns, palette: palette, includeTitle: includeTitle, paletteName: paletteName, exportZoom: exportZoom });
     });
   }
+
+  // ---- loading 提示 ----
+  function loading(show, text) {
+    var el = document.getElementById('pe-loading');
+    if (show) {
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'pe-loading';
+        el.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100000;background:#1a73e8;color:#fff;padding:8px 22px;border-radius:20px;font:13px sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);';
+        document.body.appendChild(el);
+      }
+      el.textContent = text || '正在生成…';
+    } else if (el) el.remove();
+  }
+
+  // ---- 内容 bbox 裁边：扫掉轴尾部等纯空白（html2canvas 画布→canvas 裁剪）----
+  function trimCanvas(c) {
+    try {
+      var ctx = c.getContext('2d');
+      var d = ctx.getImageData(0, 0, c.width, c.height).data;
+      var w = c.width, h = c.height;
+      var x0 = w, x1 = -1, y0 = h, y1 = -1;
+      var step = 4;                       // 采样步长加速
+      for (var y = 0; y < h; y += step) {
+        for (var x = 0; x < w; x += step) {
+          if (d[(y * w + x) * 4 + 3] > 8 && !(d[(y * w + x) * 4] > 245 && d[(y * w + x) * 4 + 1] > 245 && d[(y * w + x) * 4 + 2] > 245)) {
+            if (x < x0) x0 = x; if (x > x1) x1 = x;
+            if (y < y0) y0 = y; if (y > y1) y1 = y;
+          }
+        }
+      }
+      if (x1 < 0) return c;
+      var m = 12;                          // 留白边距(px)
+      x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m);
+      x1 = Math.min(w - 1, x1 + m); y1 = Math.min(h - 1, y1 + m);
+      var out = document.createElement('canvas');
+      out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+      out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+      return out;
+    } catch (e) { return c; }
+  }
+
+  // ---- 共享捕获引擎（供本文件与原生 PNG/PDF 通道复用）----
+  window.peCaptureCanvas = function (opts) {
+    opts = opts || {};
+    return new Promise(function (resolve, reject) {
+      var container = document.querySelector('.gantt-container');
+      if (!container) { reject(new Error('未找到甘特图容器')); return; }
+      var main = document.querySelector('.gantt-main');
+      var right = document.querySelector('.gantt-right');
+      var leftBody = document.querySelector('.gantt-left-body');
+      var contentW = Math.max(container.scrollWidth || 0, main ? main.scrollWidth : 0,
+                              right ? right.scrollWidth : 0, leftBody ? leftBody.scrollWidth : 0) || 1600;
+      var scale = Math.min(3, Math.max(0.25, (opts.scaleCap || 8000) / contentW));
+      html2canvas(container, {
+        useCORS: true, scale: scale, backgroundColor: '#fff',
+        onclone: function (doc) { expandForCapture(doc); }
+      }).then(function (canvas) {
+        resolve(opts.trim === false ? canvas : trimCanvas(canvas));
+      }).catch(reject);
+    });
+  };
+
+  // ---- 接管原生导出通道（本文件在 netplan.js 之后加载，覆盖同名全局）----
+  function downloadCanvasPng(canvas, name) {
+    var link = document.createElement('a');
+    link.download = name; link.href = canvas.toDataURL('image/png'); link.click();
+  }
+  window.exportGanttToPng = function () {
+    loading(true, '正在导出图片…');
+    window.peCaptureCanvas({}).then(function (canvas) {
+      loading(false);
+      downloadCanvasPng(canvas, '甘特图_' + new Date().toISOString().slice(0, 10) + '.png');
+    }).catch(function (e) { loading(false); alert('导出图片失败：' + e.message); });
+  };
+  window.exportGanttToPdf = function () {
+    loading(true, '正在生成 PDF…');
+    window.peCaptureCanvas({}).then(function (canvas) {
+      try {
+        var jsPdfCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+        if (!jsPdfCtor) { loading(false); alert('jsPDF 未加载'); return; }
+        var pdf = new jsPdfCtor({ orientation: 'l', unit: 'mm', format: 'a3' });
+        var pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+        var ratio = Math.min(pw / canvas.width, ph / canvas.height);
+        var w = canvas.width * ratio, h = canvas.height * ratio;
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', (pw - w) / 2, (ph - h) / 2, w, h);
+        pdf.save('甘特图_' + new Date().toISOString().slice(0, 10) + '.pdf');
+        loading(false);
+      } catch (e) { loading(false); alert('PDF 生成失败：' + e.message); }
+    }).catch(function (e) { loading(false); alert('PDF 生成失败：' + e.message); });
+  };
 
   window.printExportDialog = openDialog;
 })();
