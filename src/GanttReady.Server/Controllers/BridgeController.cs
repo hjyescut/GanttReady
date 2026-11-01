@@ -252,6 +252,13 @@ public class BridgeController : ControllerBase
         });
     }
 
+    [HttpPost("recalc/{projectId}")]
+    public async Task<IActionResult> Recalc(int projectId)
+    {
+        var n = await _projects.CalculateScheduleAsync(projectId);
+        return Ok(new { project_id = projectId, duration = n });
+    }
+
     // ---------- P6 双代号时标视图（AoA HTML 存取，fork 补丁 #2.3） ----------
     // 外部转换器（ganttready_bridge.py --aoa）把当前项目的 PDM 图转成时标双代号自包含 HTML 后 POST 到这里，
     // 落盘 wwwroot/aoa/aoa-{projectId}.html，浏览器直接打开即看。视图为校核用途，非交付件。
