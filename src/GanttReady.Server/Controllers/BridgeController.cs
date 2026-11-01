@@ -196,8 +196,8 @@ public class BridgeController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            // 典型：网络图回路（ScheduleEngine 抛出）
-            return BadRequest(new { error = ex.Message });
+            // 典型：网络图回路（ScheduleEngine 抛出）／同组合同名项目唯一性冲突
+            return Conflict(new { error = "导入冲突（回路或同组合同名项目已存在）", detail = ex.Message });
         }
         catch (Exception ex)
         {
