@@ -136,6 +136,58 @@
       });
     }
   }
+  // 轴尾裁剪：Gantt.razor 的 totalDays = Max(90, 跨度+30)，短项目被画成 90+ 天空轴
+  // （空轴有日格/网格线，像素裁边裁不掉）→ 按状态栏"总工期 N 天"＋data-day-width 裁到完工右缘
+  function trimAxisToProject(doc) {
+    var statusbar = doc.querySelector('.gantt-statusbar');
+    var m = statusbar && (statusbar.textContent || '').match(/总工期[：:]\s*(\d+)/);
+    if (!m) return;
+    var totalDays = parseInt(m[1], 10);
+    var chart = doc.querySelector('.gantt-chart');
+    var dw = chart ? parseFloat(chart.getAttribute('data-day-width') || '0') : 0;
+    if (!(totalDays > 0) || !(dw > 0)) return;
+    var cutX = Math.ceil((totalDays + 1) * dw);   // 完工日右缘 + 1 天余量
+    // 日/周/月格：按累计宽度隐藏超出部分（单遍，按时序累计）
+    ['.timeline-day', '.timeline-week', '.timeline-month'].forEach(function (sel) {
+      var acc = 0;
+      var cells = doc.querySelectorAll(sel);
+      Array.prototype.forEach.call(cells, function (cell) {
+        var w = cell.offsetWidth || 0;
+        if (acc >= cutX) cell.style.display = 'none';
+        acc += w;
+      });
+    });
+    // b) 网格/关系线/直方图区：限宽并裁剪（这些是流内容/SVG，可安全裁）
+    ['.gantt-grid-lines', '.gantt-relation-lines', '.gantt-hgrid', '.gantt-hlines'].forEach(function (sel) {
+      Array.prototype.forEach.call(doc.querySelectorAll(sel), function (el) {
+        el.style.width = cutX + 'px';
+        el.style.overflow = 'hidden';
+      });
+    });
+    // c0) 条形容器：绝对定位条形不撑高父元素，overflow:hidden 会把第 2 行起的条形裁掉
+    //     → 只限宽，高度显式对齐左表行区高度
+    var lbRef = doc.querySelector('.gantt-left-body');
+    Array.prototype.forEach.call(doc.querySelectorAll('.gantt-bars'), function (el) {
+      el.style.width = cutX + 'px';
+      if (lbRef) el.style.height = lbRef.offsetHeight + 'px';
+    });
+    // c) 标尺滚动容器同宽
+    var hs = doc.querySelector('.header-scroll');
+    if (hs) hs.style.width = cutX + 'px';
+    // d) 右表区容器收窄，避免容器 keep 全宽进画布
+    ['.gantt-right', '.gantt-main', '.gantt-chart'].forEach(function (sel) {
+      Array.prototype.forEach.call(doc.querySelectorAll(sel), function (el) {
+        var left = doc.querySelector('.gantt-left');
+        var lw = left ? left.offsetWidth : 0;
+        el.style.width = (lw + cutX) + 'px';
+      });
+    });
+    var root = doc.querySelector('.gantt-container');
+    if (root) {
+      var left2 = doc.querySelector('.gantt-left');
+      root.style.width = ((left2 ? left2.offsetWidth : 0) + cutX) + 'px';
+    }
+  }
   function addTitle(doc, paletteName) {
     var name = '';
     var sb = doc.querySelector('.gantt-statusbar');
@@ -252,6 +304,7 @@
             hideZeroBars(doc);
             if (opts.onclone) opts.onclone(doc);   // 列组隐藏+左表收缩必须先于展开，否则容器按 18 列宽展开
             expandForCapture(doc);
+            trimAxisToProject(doc);                 // 展开后按实际完工日裁轴（短项目 90 天保底的空轴）
             try {   // 尺寸探针：定位上下留白来源
               var root = doc.querySelector('.gantt-container');
               var toDim = function (el) { return el ? Math.round(el.getBoundingClientRect().width) + 'x' + Math.round(el.getBoundingClientRect().height) : '-'; };
