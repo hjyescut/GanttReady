@@ -353,7 +353,10 @@ public class ProjectService : IProjectService
                 }
                 else if (task.EarlyStart.GetValueOrDefault() > 0)
                 {
-                    calStart = _calendar.AddWorkingDays(calBits, project.PlanStartDate, task.EarlyStart.Value, calHolidays);
+                    // fork 补丁 #3（off-by-one 修复）：EarlyStart 为 0-based 偏移（ES=0 即第 1 天），
+                    // 而 AddWorkingDays 把起始日计为第 1 个工作日 → 应传 ES+1，
+                    // 否则所有 ES>0 的任务日期整体提前一天（实测 B/D 类任务完成日早一天、总工期少 1 天）。
+                    calStart = _calendar.AddWorkingDays(calBits, project.PlanStartDate, task.EarlyStart.Value + 1, calHolidays);
                 }
                 else
                 {

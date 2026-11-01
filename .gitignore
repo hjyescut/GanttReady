@@ -46,3 +46,8 @@ nul
 .openclaw/
 .playwright-cli/
 .workbuddy/
+
+# 运行时数据库（fork 补丁：不入库）
+src/GanttReady.Server/ganttready.db*
+*.db-wal
+*.db-shm
