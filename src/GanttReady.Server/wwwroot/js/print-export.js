@@ -335,6 +335,19 @@
     });
   };
 
+  // ================= PDF 嵌入优化（体积治理：超版面降采样＋大画布 JPEG） =================
+  function fitCanvas(canvas, maxW, maxH) {
+    if (canvas.width <= maxW && canvas.height <= maxH) return canvas;
+    var r = Math.min(maxW / canvas.width, maxH / canvas.height);
+    var out = document.createElement('canvas');
+    out.width = Math.round(canvas.width * r);
+    out.height = Math.round(canvas.height * r);
+    var ctx = out.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, 0, 0, out.width, out.height);
+    return out;
+  }
+
   // ================= 打印出图对话框 =================
   function exportPdf(opts) {
     loading(true, '正在渲染（含自动缩放）…');
@@ -354,9 +367,12 @@
         if (!jsPdfCtor) { loading(false); alert('jsPDF 未加载'); return; }
         var pdf = new jsPdfCtor({ orientation: 'l', unit: 'mm', format: opts.paper });
         var pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+        canvas = fitCanvas(canvas, 4961, 3508);   // A3 横向 @300dpi 上限
         var ratio = Math.min(pw / canvas.width, ph / canvas.height);
         var w = canvas.width * ratio, h = canvas.height * ratio;
-        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', (pw - w) / 2, (ph - h) / 2, w, h);
+        var big = canvas.width * canvas.height > 4e6;
+        var img = big ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png');
+        pdf.addImage(img, big ? 'JPEG' : 'PNG', (pw - w) / 2, (ph - h) / 2, w, h);
         pdf.save('甘特图_' + opts.paper.toUpperCase() + '_' + new Date().toISOString().slice(0, 10) + '.pdf');
         loading(false);
       } catch (e) { loading(false); alert('PDF 生成失败：' + e.message); }
@@ -433,9 +449,12 @@
         if (!jsPdfCtor) { loading(false); alert('jsPDF 未加载'); return; }
         var pdf = new jsPdfCtor({ orientation: 'l', unit: 'mm', format: 'a3' });
         var pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+        canvas = fitCanvas(canvas, 4961, 3508);   // A3 横向 @300dpi 上限
         var ratio = Math.min(pw / canvas.width, ph / canvas.height);
         var w = canvas.width * ratio, h = canvas.height * ratio;
-        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', (pw - w) / 2, (ph - h) / 2, w, h);
+        var big = canvas.width * canvas.height > 4e6;
+        var img = big ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png');
+        pdf.addImage(img, big ? 'JPEG' : 'PNG', (pw - w) / 2, (ph - h) / 2, w, h);
         pdf.save('甘特图_' + new Date().toISOString().slice(0, 10) + '.pdf');
         loading(false);
       } catch (e) { loading(false); alert('PDF 生成失败：' + e.message); }
