@@ -89,10 +89,11 @@ public class BridgeController : ControllerBase
                 return BadRequest(new { error = $"links 关系类型非法（仅 FS/SS/FF/SF）: {link.From}->{link.To} = {link.Type}" });
         }
 
+        Project project = null;
         try
         {
             // 1. 建项目：日历天口径 → 周一~周日全工作日（bit0~bit6 全 1 = 127）
-            var project = new Project
+            project = new Project
             {
                 Code = string.IsNullOrWhiteSpace(req.Code)
                     ? $"BRIDGE-{DateTime.UtcNow:yyyyMMdd-HHmmss}"
@@ -196,11 +197,12 @@ public class BridgeController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            // 典型：网络图回路（ScheduleEngine 抛出）／同组合同名项目唯一性冲突
+            if (project != null) { try { await _projects.DeleteProjectAsync(project.Id); } catch { } }  // 防孤儿项目累积（审计 High）
             return Conflict(new { error = "导入冲突（回路或同组合同名项目已存在）", detail = ex.Message });
         }
         catch (Exception ex)
         {
+            if (project != null) { try { await _projects.DeleteProjectAsync(project.Id); } catch { } }  // 防孤儿项目累积
             _logger.LogError(ex, "bridge import failed");
             return StatusCode(500, new { error = "导入失败", detail = ex.Message });
         }

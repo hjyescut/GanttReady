@@ -145,7 +145,7 @@
     var totalDays = parseInt(m[1], 10);
     var chart = doc.querySelector('.gantt-chart');
     var dw = chart ? parseFloat(chart.getAttribute('data-day-width') || '0') : 0;
-    if (!(totalDays > 0) || !(dw > 0)) return;
+    if (!(totalDays > 0) || !(dw > 0)) return;    // 高度修复独立于本函数（fixChartHeights 总会执行）
     var cutX = Math.ceil((totalDays + 1) * dw);   // 完工日右缘 + 1 天余量
     // 日/周/月格：按累计宽度隐藏超出部分（单遍，按时序累计）
     ['.timeline-day', '.timeline-week', '.timeline-month'].forEach(function (sel) {
@@ -164,13 +164,7 @@
         el.style.overflow = 'hidden';
       });
     });
-    // c0) 条形容器：绝对定位条形不撑高父元素，overflow:hidden 会把第 2 行起的条形裁掉
-    //     → 只限宽，高度显式对齐左表行区高度
-    var lbRef = doc.querySelector('.gantt-left-body');
-    Array.prototype.forEach.call(doc.querySelectorAll('.gantt-bars'), function (el) {
-      el.style.width = cutX + 'px';
-      if (lbRef) el.style.height = lbRef.offsetHeight + 'px';
-    });
+    // c0) 条形容器高度由 fixChartHeights 统一处理（此处不再重复）
     // c) 标尺滚动容器同宽
     var hs = doc.querySelector('.header-scroll');
     if (hs) hs.style.width = cutX + 'px';
@@ -305,6 +299,7 @@
             if (opts.onclone) opts.onclone(doc);   // 列组隐藏+左表收缩必须先于展开，否则容器按 18 列宽展开
             expandForCapture(doc);
             trimAxisToProject(doc);                 // 展开后按实际完工日裁轴（短项目 90 天保底的空轴）
+            fixChartHeights(doc);                   // 审计 High-1/2/3：图表区高度显式化（不依赖正则/不塌陷）
             try {   // 尺寸探针：定位上下留白来源
               var root = doc.querySelector('.gantt-container');
               var toDim = function (el) { return el ? Math.round(el.getBoundingClientRect().width) + 'x' + Math.round(el.getBoundingClientRect().height) : '-'; };
@@ -334,6 +329,20 @@
       doCapture();
     });
   };
+
+  // ================= 图表区高度显式化（审计 High-1/2/3） =================
+  // absolute 子元素不撑高父元素：bars/网格/关系线/直方图容器必须显式对齐左表行区高度，
+  // 且不得依赖 trimAxisToProject 的状态栏正则（失配即整图条形消失）。
+  function fixChartHeights(doc) {
+    var lb = doc.querySelector('.gantt-left-body');
+    var h = lb ? lb.offsetHeight : 0;
+    if (!(h > 0)) return;
+    ['.gantt-bars', '.gantt-grid-lines', '.gantt-relation-lines', '.gantt-hgrid', '.gantt-hlines'].forEach(function (sel) {
+      Array.prototype.forEach.call(doc.querySelectorAll(sel), function (el) {
+        el.style.height = h + 'px';
+      });
+    });
+  }
 
   // ================= PDF 嵌入优化（体积治理：超版面降采样＋大画布 JPEG） =================
   function fitCanvas(canvas, maxW, maxH) {
