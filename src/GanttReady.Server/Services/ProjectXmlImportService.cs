@@ -156,7 +156,7 @@ public class ProjectXmlImportService
                 {
                     var predUid = ParseInt(predEl.Element(Ns + "PredecessorUID")?.Value);
                     var typeVal = ParseInt(predEl.Element(Ns + "Type")?.Value);
-                    var lagVal = ParseDuration(predEl.Element(Ns + "LinkLag")?.Value);
+                    var lagVal = ParseLag(predEl.Element(Ns + "LinkLag")?.Value);   // DEF-API-01：零滞后不再强制 1 天
 
                     if (predUid <= 0 || !uidToId.ContainsKey(predUid) || !uidToId.ContainsKey(uid))
                         continue;
@@ -200,6 +200,24 @@ public class ProjectXmlImportService
     /// 解析 MS Project 时长格式 (PT8H0M0S → 天数)
     /// 默认: PT8H = 1 天
     /// </summary>
+    // LinkLag 专用：0（PT0H/空）合法——任务工期才有"最少 1 天"语义（DEF-API-01 修复）
+    private static int ParseLag(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return 0;
+        const int workHoursPerDay = 8;
+        var hrs = 0;
+        var mins = 0;
+        var dayMatch = System.Text.RegularExpressions.Regex.Match(value, @"(\d+)D");
+        if (dayMatch.Success)
+            return int.Parse(dayMatch.Groups[1].Value);
+        var hMatch = System.Text.RegularExpressions.Regex.Match(value, @"(\d+)H");
+        if (hMatch.Success) hrs = int.Parse(hMatch.Groups[1].Value);
+        var mMatch = System.Text.RegularExpressions.Regex.Match(value, @"(\d+)M");
+        if (mMatch.Success) mins = int.Parse(mMatch.Groups[1].Value);
+        var totalHours = hrs + mins / 60.0;
+        return (int)Math.Round(totalHours / workHoursPerDay);
+    }
+
     private static int ParseDuration(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return 1;
