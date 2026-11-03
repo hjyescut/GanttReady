@@ -583,6 +583,20 @@
 </div>
 
 @* ========== 底部状态栏 ========== *@
+@if (taskFloatWarnings.Count > 0)
+{
+    <div class="alert alert-warning" style="margin:4px 8px;padding:4px 10px;font-size:12px;">
+        ⚠ 时差异常（|TF|或|FF|>100）共 @taskFloatWarnings.Count 项：
+        @foreach (var w in taskFloatWarnings.Take(5))
+        {
+            <span style="margin-right:10px;">@w.Item1 = @w.Value</span>
+        }
+        @if (taskFloatWarnings.Count > 5)
+        {
+            <span>…等 @taskFloatWarnings.Count 项</span>
+        }
+    </div>
+}
 <div class="gantt-statusbar">
     @if (projects.Any(p => p.Id == currentProjectId))
     {

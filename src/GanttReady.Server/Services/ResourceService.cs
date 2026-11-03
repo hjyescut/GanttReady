@@ -75,10 +75,37 @@ public class ResourceService : IResourceService
 
         if (resource == null) return;
 
-        // 先删除关联的资源分配
+        // 先删除关联的资源分配（DEF-UI-05：记录受影响任务，删除后重算预算，防 BudgetCost 残留虚高）
+        var affectedTaskIds = resource.Assignments.Select(a => a.TaskId).Distinct().ToList();
         _db.ResourceAssignments.RemoveRange(resource.Assignments);
         _db.Resources.Remove(resource);
         await _db.SaveChangesAsync();
+
+        foreach (var taskId in affectedTaskIds)
+        {
+            var task = await _db.Tasks
+                .Include(t => t.ResourceAssignments)
+                    .ThenInclude(a => a.Resource)
+                .FirstOrDefaultAsync(t => t.Id == taskId);
+            if (task == null) continue;
+
+            decimal totalCost = 0;
+            foreach (var assignment in task.ResourceAssignments)
+            {
+                var res = assignment.Resource;
+                if (res == null) continue;
+                if (res.Type == ResourceType.Material || res.Type == ResourceType.Measure)
+                    totalCost += assignment.Quantity * res.UnitPrice;
+                else
+                {
+                    var hourlyCost = res.HourlyCost ?? res.UnitPrice;
+                    totalCost += assignment.Quantity * hourlyCost * task.PlanDuration * 8;
+                }
+            }
+            task.BudgetCost = totalCost;
+        }
+        if (affectedTaskIds.Count > 0)
+            await _db.SaveChangesAsync();
     }
 
     public async Task<List<ResourceAssignment>> GetAssignmentsByTaskIdAsync(int taskId)
