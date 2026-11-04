@@ -985,7 +985,7 @@
                     <button class="btn btn-danger" @onclick="DeleteCurrentTask">删除任务</button>
                 }
                 <div style="flex:1;"></div>
-                <button class="btn btn-default" @onclick="() => taskModalVisible = false">取消</button>
+                <button class="btn btn-default" @onclick="CancelTaskEdit">取消</button>
                 <button class="btn btn-primary" @onclick="HandleTaskOk">确定</button>
             </div>
         </div>
@@ -1887,6 +1887,14 @@
         await JS.InvokeVoidAsync("saveDraft", $"task_{editingTask.Id}", json);
     }
 
+    private async Task CancelTaskEdit()
+    {
+        // DEF-UI-09：取消编辑时保存草稿（原 SaveDraft 为死代码，草稿永不写入）
+        if (editingTask != null && editingTask.Id > 0)
+            await SaveDraft();
+        taskModalVisible = false;
+    }
+
     private async Task HandleTaskOk()
     {
         if (editingTask == null) return;
@@ -2230,7 +2238,17 @@
     private async Task RecalculateSchedule()
     {
         if (currentProjectId == 0) return;
-        await ProjectService.CalculateScheduleAsync(currentProjectId);
+        try
+        {
+            await ProjectService.CalculateScheduleAsync(currentProjectId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 循环依赖等排程异常：Toast 呈现而非电路断连（DEF-UI-04 修复，重落地）
+            Toast.Error($"重算失败：{ex.Message}");
+            await LoadTasks();
+            return;
+        }
         await LoadTasks();
     }
 
@@ -2303,6 +2321,9 @@
             ? selectedTasks.ToList()
             : selectedTaskId.HasValue ? new List<int> { selectedTaskId.Value } : null;
         if (idsToDelete == null || idsToDelete.Count == 0) return;
+        // DEF-UI-03：勾选集与高亮可能不同步，删除前必须确认（防误删，重落地）
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"确定删除选中的 {idsToDelete.Count} 个任务及其关系/分配吗？");
+        if (!confirmed) return;
 
         try
         {
